@@ -61,7 +61,7 @@ See you later,また後で
 - ✅ Chrome/Edge 
 - ✅ Firefox
 - ✅ Safari
-- ⚠️ Requires a browser that supports Web Speech API and MediaRecorder
+- ⚠️ Requires a browser that supports Web Speech API
 
 ## Technical Details
 
