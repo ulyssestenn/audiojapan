@@ -16,7 +16,7 @@ A simple web application for creating audio files from English-Japanese sentence
 ## How to Use
 
 1. **Open the Application**
-   - Open `language-audio-app.html` in any modern web browser (Chrome, Firefox, Safari, Edge)
+   - Open `jp-en-lang-learning-audio-player.html` in any modern web browser (Chrome, Firefox, Safari, Edge)
    - No installation or server required - runs entirely in your browser
 
 2. **Prepare Your CSV File**
