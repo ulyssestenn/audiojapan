@@ -336,6 +336,71 @@
             color: var(--red-seal);
         }
 
+        .voice-tools {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            margin-top: 0.75rem;
+        }
+
+        .btn-small {
+            padding: 0.55rem 1rem;
+            font-size: 0.8rem;
+        }
+
+        .voice-help-text {
+            margin-top: 0.6rem;
+            font-size: 0.8rem;
+            color: var(--gray-wash);
+        }
+
+        .modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.7);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+            z-index: 1000;
+        }
+
+        .modal.show {
+            display: flex;
+        }
+
+        .modal-card {
+            width: min(700px, 100%);
+            max-height: 85vh;
+            overflow-y: auto;
+            background: var(--rice-paper);
+            border-left: 4px solid var(--red-seal);
+            border-radius: 2px;
+            padding: 1.5rem;
+        }
+
+        .modal-card h3 {
+            margin-bottom: 0.75rem;
+            font-family: 'Noto Serif JP', serif;
+        }
+
+        .modal-card ul {
+            margin: 0.5rem 0 1.2rem 1.3rem;
+        }
+
+        .modal-card li {
+            margin-bottom: 0.35rem;
+        }
+
+        .modal-note {
+            font-size: 0.85rem;
+            color: var(--soft-black);
+            background: white;
+            border-left: 3px solid var(--gray-wash);
+            padding: 0.75rem;
+            margin-bottom: 1rem;
+        }
+
         .current-sentence {
             background: white;
             padding: 1.5rem;
@@ -447,6 +512,15 @@
             </div>
 
             <div class="control-group">
+                <label>Voice Setup Help</label>
+                <div class="voice-tools">
+                    <button class="btn btn-secondary btn-small" id="voiceHelpBtn" type="button">How to Add Voices</button>
+                    <button class="btn btn-secondary btn-small" id="refreshVoicesBtn" type="button">Refresh Voice List</button>
+                </div>
+                <p class="voice-help-text">Browsers cannot silently install voices, but they can detect newly installed voices after refresh.</p>
+            </div>
+
+            <div class="control-group">
                 <label>Speech Rate</label>
                 <input type="range" id="speechRate" min="0.5" max="1.5" step="0.1" value="0.9">
                 <span class="range-value" id="rateValue">0.9x</span>
@@ -480,6 +554,42 @@
 
             <div class="progress-info" id="progressInfo">
                 Sentence 0 of 0 (Repetition 0 of 0)
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="voiceHelpModal" aria-hidden="true">
+        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="voiceHelpTitle">
+            <h3 id="voiceHelpTitle">How to Add More Voices</h3>
+            <p class="modal-note">
+                This app uses your browser + operating system text-to-speech voices. For privacy/security reasons, websites cannot install voices automatically.
+            </p>
+
+            <h4>Windows 10/11</h4>
+            <ul>
+                <li>Open <strong>Settings → Time &amp; language → Language &amp; region</strong>.</li>
+                <li>Add Japanese (or another language) under preferred languages if needed.</li>
+                <li>Open <strong>Speech</strong> settings and install additional speech packs/voices.</li>
+                <li>Restart the browser and click <strong>Refresh Voice List</strong> in this app.</li>
+            </ul>
+
+            <h4>macOS</h4>
+            <ul>
+                <li>Open <strong>System Settings → Accessibility → Spoken Content</strong>.</li>
+                <li>Choose <strong>System Voice → Manage Voices…</strong>.</li>
+                <li>Download Japanese and English voices you want.</li>
+                <li>Reopen the browser tab and click <strong>Refresh Voice List</strong>.</li>
+            </ul>
+
+            <h4>ChromeOS / Linux</h4>
+            <ul>
+                <li>Voice availability depends on browser and installed speech engines.</li>
+                <li>Install language packs/voices at OS level (or browser-specific voice extensions where supported).</li>
+                <li>Reload this page and refresh the voice list.</li>
+            </ul>
+
+            <div class="button-group" style="margin-top: 0.5rem;">
+                <button class="btn" id="closeVoiceHelpBtn" type="button">Got it</button>
             </div>
         </div>
     </div>
@@ -550,6 +660,21 @@
             document.getElementById('pauseBtn').addEventListener('click', pausePlayback);
             document.getElementById('stopBtn').addEventListener('click', stopPlayback);
             document.getElementById('restartBtn').addEventListener('click', restartPlayback);
+            document.getElementById('voiceHelpBtn').addEventListener('click', openVoiceHelp);
+            document.getElementById('closeVoiceHelpBtn').addEventListener('click', closeVoiceHelp);
+            document.getElementById('refreshVoicesBtn').addEventListener('click', refreshVoices);
+
+            document.getElementById('voiceHelpModal').addEventListener('click', (e) => {
+                if (e.target.id === 'voiceHelpModal') {
+                    closeVoiceHelp();
+                }
+            });
+
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    closeVoiceHelp();
+                }
+            });
         }
 
         function loadVoices() {
@@ -590,6 +715,24 @@
             if (speechSynthesis.onvoiceschanged !== undefined) {
                 speechSynthesis.onvoiceschanged = populateVoices;
             }
+        }
+
+        function refreshVoices() {
+            loadVoices();
+            showStatus('Voice list refreshed. If no new voices appear, restart your browser after installing OS voices.', 'success');
+        }
+
+        function openVoiceHelp() {
+            const modal = document.getElementById('voiceHelpModal');
+            modal.classList.add('show');
+            modal.setAttribute('aria-hidden', 'false');
+        }
+
+        function closeVoiceHelp() {
+            const modal = document.getElementById('voiceHelpModal');
+            if (!modal.classList.contains('show')) return;
+            modal.classList.remove('show');
+            modal.setAttribute('aria-hidden', 'true');
         }
 
         function handleFile(file) {
