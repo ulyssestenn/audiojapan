@@ -445,6 +445,31 @@
             margin-top: 1rem;
             font-size: 0.9rem;
         }
+
+        .progress-bar-container {
+            width: 100%;
+            height: 6px;
+            background: var(--soft-black);
+            border-radius: 3px;
+            margin-top: 1rem;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: var(--red-seal);
+            border-radius: 3px;
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .sentence-pair.clickable {
+            cursor: pointer;
+        }
+
+        .sentence-pair.clickable:hover {
+            background: #f0ede6;
+        }
     </style>
 </head>
 <body>
@@ -468,7 +493,7 @@
             <input type="file" id="fileInput" accept=".csv">
         </div>
 
-        <div class="status" id="status"></div>
+        <div class="status" id="status" role="alert" aria-live="polite"></div>
 
         <div id="previewSection" style="display: none;">
             <h2 style="margin-bottom: 1rem; font-family: 'Noto Serif JP', serif;">Your Sentences</h2>
@@ -545,15 +570,19 @@
                 <div class="text">Press play to begin</div>
             </div>
 
-            <div class="button-group">
-                <button class="btn" id="playBtn">▶ Play</button>
-                <button class="btn btn-secondary" id="pauseBtn">⏸ Pause</button>
-                <button class="btn btn-secondary" id="stopBtn">⏹ Stop</button>
-                <button class="btn btn-secondary" id="restartBtn">↻ Restart</button>
+            <div class="button-group" role="toolbar" aria-label="Playback controls">
+                <button class="btn" id="playBtn" aria-label="Play">▶ Play</button>
+                <button class="btn btn-secondary" id="pauseBtn" aria-label="Pause">⏸ Pause</button>
+                <button class="btn btn-secondary" id="stopBtn" aria-label="Stop">⏹ Stop</button>
+                <button class="btn btn-secondary" id="restartBtn" aria-label="Restart">↻ Restart</button>
             </div>
 
             <div class="progress-info" id="progressInfo">
                 Sentence 0 of 0 (Repetition 0 of 0)
+            </div>
+
+            <div class="progress-bar-container" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" id="progressBarContainer">
+                <div class="progress-bar" id="progressBar"></div>
             </div>
         </div>
     </div>
@@ -595,400 +624,585 @@
     </div>
 
     <script>
-        let sentences = [];
-        let currentSentenceIndex = 0;
-        let currentRepetition = 0;
-        let isPlaying = false;
-        let isPaused = false;
-        let isEnglish = true;
-        let pauseTimeout = null;
+        (function() {
+            'use strict';
 
-        // Settings
-        let pauseDuration = 2000;
-        let repetitions = 1;
-        let speechRate = 0.9;
-        let englishVoice = null;
-        let japaneseVoice = null;
-        let languageOrder = 'english-first';
+            let sentences = [];
+            let currentSentenceIndex = 0;
+            let currentRepetition = 0;
+            let isPlaying = false;
+            let isPaused = false;
+            let isEnglish = true;
+            let pauseTimeout = null;
 
-        // Initialize
-        document.addEventListener('DOMContentLoaded', () => {
-            loadVoices();
-            setupEventListeners();
-        });
+            // Settings
+            let pauseDuration = 2000;
+            let repetitions = 1;
+            let speechRate = 0.9;
+            let englishVoice = null;
+            let japaneseVoice = null;
+            let languageOrder = 'english-first';
 
-        function setupEventListeners() {
-            const uploadZone = document.getElementById('uploadZone');
-            const fileInput = document.getElementById('fileInput');
+            const SETTINGS_KEY = 'audiojapan-settings';
 
-            uploadZone.addEventListener('click', () => fileInput.click());
-            
-            uploadZone.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                uploadZone.classList.add('dragover');
+            // Initialize
+            document.addEventListener('DOMContentLoaded', () => {
+                loadVoices();
+                setupEventListeners();
+                restoreSettings();
             });
 
-            uploadZone.addEventListener('dragleave', () => {
-                uploadZone.classList.remove('dragover');
-            });
-
-            uploadZone.addEventListener('drop', (e) => {
-                e.preventDefault();
-                uploadZone.classList.remove('dragover');
-                const files = e.dataTransfer.files;
-                if (files.length > 0) {
-                    handleFile(files[0]);
-                }
-            });
-
-            fileInput.addEventListener('change', (e) => {
-                if (e.target.files.length > 0) {
-                    handleFile(e.target.files[0]);
-                }
-            });
-
-            document.getElementById('pauseDuration').addEventListener('input', (e) => {
-                document.getElementById('pauseValue').textContent = e.target.value + 's';
-            });
-
-            document.getElementById('speechRate').addEventListener('input', (e) => {
-                document.getElementById('rateValue').textContent = e.target.value + 'x';
-            });
-
-            document.getElementById('startBtn').addEventListener('click', startPlayback);
-            document.getElementById('playBtn').addEventListener('click', resumePlayback);
-            document.getElementById('pauseBtn').addEventListener('click', pausePlayback);
-            document.getElementById('stopBtn').addEventListener('click', stopPlayback);
-            document.getElementById('restartBtn').addEventListener('click', restartPlayback);
-            document.getElementById('voiceHelpBtn').addEventListener('click', openVoiceHelp);
-            document.getElementById('closeVoiceHelpBtn').addEventListener('click', closeVoiceHelp);
-            document.getElementById('refreshVoicesBtn').addEventListener('click', refreshVoices);
-
-            document.getElementById('voiceHelpModal').addEventListener('click', (e) => {
-                if (e.target.id === 'voiceHelpModal') {
-                    closeVoiceHelp();
-                }
-            });
-
-            document.addEventListener('keydown', (e) => {
-                if (e.key === 'Escape') {
-                    closeVoiceHelp();
-                }
-            });
-        }
-
-        function loadVoices() {
-            const populateVoices = () => {
-                const voices = speechSynthesis.getVoices();
-                const englishSelect = document.getElementById('englishVoice');
-                const japaneseSelect = document.getElementById('japaneseVoice');
-
-                englishSelect.innerHTML = '';
-                japaneseSelect.innerHTML = '';
-
-                const englishVoices = voices.filter(v => v.lang.startsWith('en'));
-                const japaneseVoices = voices.filter(v => v.lang.startsWith('ja'));
-
-                englishVoices.forEach(voice => {
-                    const option = document.createElement('option');
-                    option.value = voice.name;
-                    option.textContent = `${voice.name} (${voice.lang})`;
-                    englishSelect.appendChild(option);
-                });
-
-                japaneseVoices.forEach(voice => {
-                    const option = document.createElement('option');
-                    option.value = voice.name;
-                    option.textContent = `${voice.name} (${voice.lang})`;
-                    japaneseSelect.appendChild(option);
-                });
-
-                if (englishVoices.length === 0) {
-                    englishSelect.innerHTML = '<option>No English voices available</option>';
-                }
-                if (japaneseVoices.length === 0) {
-                    japaneseSelect.innerHTML = '<option>No Japanese voices available</option>';
-                }
-            };
-
-            populateVoices();
-            if (speechSynthesis.onvoiceschanged !== undefined) {
-                speechSynthesis.onvoiceschanged = populateVoices;
-            }
-        }
-
-        function refreshVoices() {
-            loadVoices();
-            showStatus('Voice list refreshed. If no new voices appear, restart your browser after installing OS voices.', 'success');
-        }
-
-        function openVoiceHelp() {
-            const modal = document.getElementById('voiceHelpModal');
-            modal.classList.add('show');
-            modal.setAttribute('aria-hidden', 'false');
-        }
-
-        function closeVoiceHelp() {
-            const modal = document.getElementById('voiceHelpModal');
-            if (!modal.classList.contains('show')) return;
-            modal.classList.remove('show');
-            modal.setAttribute('aria-hidden', 'true');
-        }
-
-        function handleFile(file) {
-            if (!file.name.endsWith('.csv')) {
-                showStatus('Please upload a CSV file.', 'error');
-                return;
-            }
-
-            const reader = new FileReader();
-            reader.onload = (e) => {
+            function saveSettings() {
                 try {
-                    parseCSV(e.target.result);
-                    showStatus(`Successfully loaded ${sentences.length} sentence pairs!`, 'success');
-                    displayPreview();
-                    document.getElementById('controls').style.display = 'block';
-                } catch (error) {
-                    showStatus(`Error parsing CSV: ${error.message}`, 'error');
-                }
-            };
-            reader.readAsText(file);
-        }
-
-        function parseCSV(text) {
-            const lines = text.split('\n').filter(line => line.trim());
-            if (lines.length < 2) {
-                throw new Error('CSV file must have at least a header and one data row');
-            }
-
-            const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
-            const englishIndex = headers.findIndex(h => h.includes('english'));
-            const japaneseIndex = headers.findIndex(h => h.includes('japanese') || h.includes('日本語'));
-
-            if (englishIndex === -1 || japaneseIndex === -1) {
-                throw new Error('CSV must have "English" and "Japanese" columns');
-            }
-
-            sentences = [];
-            for (let i = 1; i < lines.length; i++) {
-                const values = parseCSVLine(lines[i]);
-                if (values[englishIndex] && values[japaneseIndex]) {
-                    sentences.push({
-                        english: values[englishIndex].trim(),
-                        japanese: values[japaneseIndex].trim()
-                    });
+                    const settings = {
+                        pauseDuration: document.getElementById('pauseDuration').value,
+                        repetitions: document.getElementById('repetitions').value,
+                        speechRate: document.getElementById('speechRate').value,
+                        languageOrder: document.getElementById('languageOrder').value,
+                        englishVoice: document.getElementById('englishVoice').value,
+                        japaneseVoice: document.getElementById('japaneseVoice').value
+                    };
+                    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+                } catch (e) {
+                    // localStorage may be unavailable (private browsing, quota exceeded)
                 }
             }
 
-            if (sentences.length === 0) {
-                throw new Error('No valid sentence pairs found in CSV');
-            }
-        }
+            function restoreSettings() {
+                try {
+                    const raw = localStorage.getItem(SETTINGS_KEY);
+                    if (!raw) return;
+                    const settings = JSON.parse(raw);
 
-        function parseCSVLine(line) {
-            const values = [];
-            let current = '';
-            let inQuotes = false;
-
-            for (let i = 0; i < line.length; i++) {
-                const char = line[i];
-                
-                if (char === '"') {
-                    inQuotes = !inQuotes;
-                } else if (char === ',' && !inQuotes) {
-                    values.push(current);
-                    current = '';
-                } else {
-                    current += char;
-                }
-            }
-            values.push(current);
-            
-            return values.map(v => v.replace(/^"|"$/g, '').trim());
-        }
-
-        function displayPreview() {
-            const preview = document.getElementById('sentencesPreview');
-            const previewSection = document.getElementById('previewSection');
-            
-            preview.innerHTML = sentences.map((pair, index) => `
-                <div class="sentence-pair" id="pair-${index}" style="animation-delay: ${index * 0.02}s">
-                    <div class="english">${escapeHtml(pair.english)}</div>
-                    <div class="japanese">${escapeHtml(pair.japanese)}</div>
-                </div>
-            `).join('');
-
-            previewSection.style.display = 'block';
-        }
-
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-
-        function showStatus(message, type = 'success') {
-            const status = document.getElementById('status');
-            status.textContent = message;
-            status.className = `status ${type} show`;
-            setTimeout(() => {
-                status.classList.remove('show');
-            }, 5000);
-        }
-
-        function startPlayback() {
-            // Get current settings
-            pauseDuration = parseFloat(document.getElementById('pauseDuration').value) * 1000;
-            repetitions = parseInt(document.getElementById('repetitions').value);
-            speechRate = parseFloat(document.getElementById('speechRate').value);
-            languageOrder = document.getElementById('languageOrder').value;
-            
-            const voices = speechSynthesis.getVoices();
-            englishVoice = voices.find(v => v.name === document.getElementById('englishVoice').value);
-            japaneseVoice = voices.find(v => v.name === document.getElementById('japaneseVoice').value);
-
-            // Reset state
-            currentSentenceIndex = 0;
-            currentRepetition = 0;
-            // Set initial language based on user preference
-            isEnglish = (languageOrder === 'english-first');
-            isPlaying = true;
-            isPaused = false;
-
-            // Show player
-            document.getElementById('playerSection').classList.add('show');
-            document.getElementById('playBtn').disabled = true;
-            document.getElementById('pauseBtn').disabled = false;
-
-            // Start speaking
-            speakNext();
-        }
-
-        function speakNext() {
-            if (!isPlaying || isPaused) return;
-
-            if (currentSentenceIndex >= sentences.length) {
-                // Finished
-                stopPlayback();
-                showStatus('Playback completed!', 'success');
-                return;
-            }
-
-            const pair = sentences[currentSentenceIndex];
-            const text = isEnglish ? pair.english : pair.japanese;
-            const voice = isEnglish ? englishVoice : japaneseVoice;
-
-            // Update UI
-            updateCurrentSentence(text, isEnglish);
-            highlightCurrentPair();
-            updateProgress();
-
-            const utterance = new SpeechSynthesisUtterance(text);
-            if (voice) utterance.voice = voice;
-            utterance.rate = speechRate;
-
-            utterance.onend = () => {
-                if (!isPlaying || isPaused) return;
-
-                pauseTimeout = setTimeout(() => {
-                    // Determine what language we just spoke
-                    const firstLanguageIsEnglish = (languageOrder === 'english-first');
-                    const justSpokeFirstLanguage = (isEnglish === firstLanguageIsEnglish);
-                    
-                    if (justSpokeFirstLanguage) {
-                        // Just spoke first language, now speak second language
-                        isEnglish = !isEnglish;
-                        speakNext();
-                    } else {
-                        // Just spoke second language, reset for next repetition/sentence
-                        isEnglish = firstLanguageIsEnglish;
-                        currentRepetition++;
-                        
-                        if (currentRepetition >= repetitions) {
-                            currentRepetition = 0;
-                            currentSentenceIndex++;
-                        }
-                        
-                        speakNext();
+                    if (settings.pauseDuration) {
+                        document.getElementById('pauseDuration').value = settings.pauseDuration;
+                        document.getElementById('pauseValue').textContent = settings.pauseDuration + 's';
                     }
-                }, pauseDuration);
-            };
-
-            speechSynthesis.speak(utterance);
-        }
-
-        function pausePlayback() {
-            isPaused = true;
-            speechSynthesis.pause();
-            if (pauseTimeout) {
-                clearTimeout(pauseTimeout);
-                pauseTimeout = null;
+                    if (settings.repetitions) {
+                        document.getElementById('repetitions').value = settings.repetitions;
+                    }
+                    if (settings.speechRate) {
+                        document.getElementById('speechRate').value = settings.speechRate;
+                        document.getElementById('rateValue').textContent = settings.speechRate + 'x';
+                    }
+                    if (settings.languageOrder) {
+                        document.getElementById('languageOrder').value = settings.languageOrder;
+                    }
+                    // Voice restoration is deferred until voices are loaded
+                    if (settings.englishVoice) {
+                        document.getElementById('englishVoice').dataset.savedVoice = settings.englishVoice;
+                    }
+                    if (settings.japaneseVoice) {
+                        document.getElementById('japaneseVoice').dataset.savedVoice = settings.japaneseVoice;
+                    }
+                } catch (e) {
+                    // Ignore corrupt or unavailable settings
+                }
             }
-            document.getElementById('playBtn').disabled = false;
-            document.getElementById('pauseBtn').disabled = true;
-        }
 
-        function resumePlayback() {
-            if (!isPlaying) return;
-            isPaused = false;
-            
-            if (speechSynthesis.paused) {
-                speechSynthesis.resume();
-            } else {
+            function setupEventListeners() {
+                const uploadZone = document.getElementById('uploadZone');
+                const fileInput = document.getElementById('fileInput');
+
+                uploadZone.addEventListener('click', () => fileInput.click());
+
+                uploadZone.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    uploadZone.classList.add('dragover');
+                });
+
+                uploadZone.addEventListener('dragleave', () => {
+                    uploadZone.classList.remove('dragover');
+                });
+
+                uploadZone.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    uploadZone.classList.remove('dragover');
+                    const files = e.dataTransfer.files;
+                    if (files.length > 0) {
+                        handleFile(files[0]);
+                    }
+                });
+
+                fileInput.addEventListener('change', (e) => {
+                    if (e.target.files.length > 0) {
+                        handleFile(e.target.files[0]);
+                    }
+                });
+
+                document.getElementById('pauseDuration').addEventListener('input', (e) => {
+                    document.getElementById('pauseValue').textContent = e.target.value + 's';
+                    saveSettings();
+                });
+
+                document.getElementById('speechRate').addEventListener('input', (e) => {
+                    document.getElementById('rateValue').textContent = e.target.value + 'x';
+                    saveSettings();
+                });
+
+                document.getElementById('repetitions').addEventListener('change', saveSettings);
+                document.getElementById('languageOrder').addEventListener('change', saveSettings);
+                document.getElementById('englishVoice').addEventListener('change', saveSettings);
+                document.getElementById('japaneseVoice').addEventListener('change', saveSettings);
+
+                document.getElementById('startBtn').addEventListener('click', startPlayback);
+                document.getElementById('playBtn').addEventListener('click', resumePlayback);
+                document.getElementById('pauseBtn').addEventListener('click', pausePlayback);
+                document.getElementById('stopBtn').addEventListener('click', stopPlayback);
+                document.getElementById('restartBtn').addEventListener('click', restartPlayback);
+                document.getElementById('voiceHelpBtn').addEventListener('click', openVoiceHelp);
+                document.getElementById('closeVoiceHelpBtn').addEventListener('click', closeVoiceHelp);
+                document.getElementById('refreshVoicesBtn').addEventListener('click', refreshVoices);
+
+                document.getElementById('voiceHelpModal').addEventListener('click', (e) => {
+                    if (e.target.id === 'voiceHelpModal') {
+                        closeVoiceHelp();
+                    }
+                });
+
+                document.addEventListener('keydown', (e) => {
+                    if (e.key === 'Escape') {
+                        closeVoiceHelp();
+                    }
+                });
+            }
+
+            function loadVoices() {
+                const populateVoices = () => {
+                    const voices = speechSynthesis.getVoices();
+                    const englishSelect = document.getElementById('englishVoice');
+                    const japaneseSelect = document.getElementById('japaneseVoice');
+
+                    const savedEnglish = englishSelect.dataset.savedVoice || englishSelect.value;
+                    const savedJapanese = japaneseSelect.dataset.savedVoice || japaneseSelect.value;
+
+                    englishSelect.innerHTML = '';
+                    japaneseSelect.innerHTML = '';
+
+                    const englishVoices = voices.filter(v => v.lang.startsWith('en'));
+                    const japaneseVoices = voices.filter(v => v.lang.startsWith('ja'));
+
+                    englishVoices.forEach(voice => {
+                        const option = document.createElement('option');
+                        option.value = voice.name;
+                        option.textContent = `${voice.name} (${voice.lang})`;
+                        if (voice.name === savedEnglish) option.selected = true;
+                        englishSelect.appendChild(option);
+                    });
+
+                    japaneseVoices.forEach(voice => {
+                        const option = document.createElement('option');
+                        option.value = voice.name;
+                        option.textContent = `${voice.name} (${voice.lang})`;
+                        if (voice.name === savedJapanese) option.selected = true;
+                        japaneseSelect.appendChild(option);
+                    });
+
+                    if (englishVoices.length === 0) {
+                        englishSelect.innerHTML = '<option>No English voices available</option>';
+                    }
+                    if (japaneseVoices.length === 0) {
+                        japaneseSelect.innerHTML = '<option>No Japanese voices available</option>';
+                    }
+
+                    // Clear saved voice data attributes after restoring
+                    delete englishSelect.dataset.savedVoice;
+                    delete japaneseSelect.dataset.savedVoice;
+                };
+
+                populateVoices();
+                if (speechSynthesis.onvoiceschanged !== undefined) {
+                    speechSynthesis.onvoiceschanged = populateVoices;
+                }
+            }
+
+            function refreshVoices() {
+                loadVoices();
+                showStatus('Voice list refreshed. If no new voices appear, restart your browser after installing OS voices.', 'success');
+            }
+
+            function openVoiceHelp() {
+                const modal = document.getElementById('voiceHelpModal');
+                modal.classList.add('show');
+                modal.setAttribute('aria-hidden', 'false');
+                // Focus the close button and trap focus inside the modal
+                const closeBtn = document.getElementById('closeVoiceHelpBtn');
+                closeBtn.focus();
+                modal.addEventListener('keydown', trapFocus);
+            }
+
+            function closeVoiceHelp() {
+                const modal = document.getElementById('voiceHelpModal');
+                if (!modal.classList.contains('show')) return;
+                modal.classList.remove('show');
+                modal.setAttribute('aria-hidden', 'true');
+                modal.removeEventListener('keydown', trapFocus);
+                // Return focus to the button that opened the modal
+                document.getElementById('voiceHelpBtn').focus();
+            }
+
+            function trapFocus(e) {
+                if (e.key !== 'Tab') return;
+                const modal = document.getElementById('voiceHelpModal');
+                const focusable = modal.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+                if (focusable.length === 0) return;
+                const first = focusable[0];
+                const last = focusable[focusable.length - 1];
+                if (e.shiftKey) {
+                    if (document.activeElement === first) {
+                        e.preventDefault();
+                        last.focus();
+                    }
+                } else {
+                    if (document.activeElement === last) {
+                        e.preventDefault();
+                        first.focus();
+                    }
+                }
+            }
+
+            function handleFile(file) {
+                if (!file.name.endsWith('.csv')) {
+                    showStatus('Please upload a CSV file.', 'error');
+                    return;
+                }
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        parseCSV(e.target.result);
+                        showStatus(`Successfully loaded ${sentences.length} sentence pairs!`, 'success');
+                        displayPreview();
+                        document.getElementById('controls').style.display = 'block';
+                    } catch (error) {
+                        showStatus(`Error parsing CSV: ${error.message}`, 'error');
+                    }
+                };
+                reader.readAsText(file);
+            }
+
+            function parseCSV(text) {
+                const lines = text.split('\n').filter(line => line.trim());
+                if (lines.length < 2) {
+                    throw new Error('CSV file must have at least a header and one data row');
+                }
+
+                const headerValues = parseCSVLine(lines[0]);
+                const headers = headerValues.map(h => h.trim().toLowerCase());
+                const englishIndex = headers.findIndex(h => h.includes('english'));
+                const japaneseIndex = headers.findIndex(h => h.includes('japanese') || h.includes('日本語'));
+
+                if (englishIndex === -1 || japaneseIndex === -1) {
+                    throw new Error('CSV must have "English" and "Japanese" columns');
+                }
+
+                sentences = [];
+                for (let i = 1; i < lines.length; i++) {
+                    const values = parseCSVLine(lines[i]);
+                    if (values[englishIndex] && values[japaneseIndex]) {
+                        sentences.push({
+                            english: values[englishIndex].trim(),
+                            japanese: values[japaneseIndex].trim()
+                        });
+                    }
+                }
+
+                if (sentences.length === 0) {
+                    throw new Error('No valid sentence pairs found in CSV');
+                }
+            }
+
+            function parseCSVLine(line) {
+                const values = [];
+                let current = '';
+                let inQuotes = false;
+
+                for (let i = 0; i < line.length; i++) {
+                    const char = line[i];
+
+                    if (inQuotes) {
+                        if (char === '"') {
+                            // Check for escaped quote ("")
+                            if (i + 1 < line.length && line[i + 1] === '"') {
+                                current += '"';
+                                i++; // skip the next quote
+                            } else {
+                                inQuotes = false;
+                            }
+                        } else {
+                            current += char;
+                        }
+                    } else {
+                        if (char === '"') {
+                            inQuotes = true;
+                        } else if (char === ',' || char === '\t') {
+                            values.push(current);
+                            current = '';
+                        } else {
+                            current += char;
+                        }
+                    }
+                }
+                values.push(current);
+
+                return values.map(v => v.trim());
+            }
+
+            function displayPreview() {
+                const preview = document.getElementById('sentencesPreview');
+                const previewSection = document.getElementById('previewSection');
+
+                preview.innerHTML = sentences.map((pair, index) => `
+                    <div class="sentence-pair clickable" id="pair-${index}" data-index="${index}" style="animation-delay: ${index * 0.02}s">
+                        <div class="english">${escapeHtml(pair.english)}</div>
+                        <div class="japanese">${escapeHtml(pair.japanese)}</div>
+                    </div>
+                `).join('');
+
+                // Click-to-jump: click a sentence pair to start playback from that sentence
+                preview.addEventListener('click', (e) => {
+                    const pair = e.target.closest('.sentence-pair');
+                    if (!pair) return;
+                    const index = parseInt(pair.dataset.index, 10);
+                    if (isNaN(index)) return;
+                    jumpToSentence(index);
+                });
+
+                previewSection.style.display = 'block';
+            }
+
+            function jumpToSentence(index) {
+                if (index < 0 || index >= sentences.length) return;
+
+                // If already playing, stop first
+                if (isPlaying) {
+                    speechSynthesis.cancel();
+                    if (pauseTimeout) {
+                        clearTimeout(pauseTimeout);
+                        pauseTimeout = null;
+                    }
+                }
+
+                // Read current settings
+                pauseDuration = parseFloat(document.getElementById('pauseDuration').value) * 1000;
+                repetitions = parseInt(document.getElementById('repetitions').value);
+                speechRate = parseFloat(document.getElementById('speechRate').value);
+                languageOrder = document.getElementById('languageOrder').value;
+
+                const voices = speechSynthesis.getVoices();
+                englishVoice = voices.find(v => v.name === document.getElementById('englishVoice').value);
+                japaneseVoice = voices.find(v => v.name === document.getElementById('japaneseVoice').value);
+
+                currentSentenceIndex = index;
+                currentRepetition = 0;
+                isEnglish = (languageOrder === 'english-first');
+                isPlaying = true;
+                isPaused = false;
+
+                document.getElementById('playerSection').classList.add('show');
+                document.getElementById('playBtn').disabled = true;
+                document.getElementById('pauseBtn').disabled = false;
+
                 speakNext();
             }
-            
-            document.getElementById('playBtn').disabled = true;
-            document.getElementById('pauseBtn').disabled = false;
-        }
 
-        function stopPlayback() {
-            isPlaying = false;
-            isPaused = false;
-            speechSynthesis.cancel();
-            if (pauseTimeout) {
-                clearTimeout(pauseTimeout);
-                pauseTimeout = null;
+            function escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
             }
-            
-            document.getElementById('playBtn').disabled = false;
-            document.getElementById('pauseBtn').disabled = true;
-            
-            // Clear highlighting
-            document.querySelectorAll('.sentence-pair').forEach(el => {
-                el.classList.remove('active');
-            });
-        }
 
-        function restartPlayback() {
-            stopPlayback();
-            setTimeout(() => startPlayback(), 100);
-        }
-
-        function updateCurrentSentence(text, isEng) {
-            const label = document.querySelector('.current-sentence .label');
-            const textEl = document.querySelector('.current-sentence .text');
-            
-            label.textContent = isEng ? 'English' : '日本語 Japanese';
-            textEl.textContent = text;
-            textEl.className = isEng ? 'text' : 'text japanese-text';
-        }
-
-        function highlightCurrentPair() {
-            document.querySelectorAll('.sentence-pair').forEach(el => {
-                el.classList.remove('active');
-            });
-            
-            const currentPair = document.getElementById(`pair-${currentSentenceIndex}`);
-            if (currentPair) {
-                currentPair.classList.add('active');
+            function showStatus(message, type = 'success') {
+                const status = document.getElementById('status');
+                status.textContent = message;
+                status.className = `status ${type} show`;
+                setTimeout(() => {
+                    status.classList.remove('show');
+                }, 5000);
             }
-        }
 
-        function updateProgress() {
-            const progressInfo = document.getElementById('progressInfo');
-            progressInfo.textContent = `Sentence ${currentSentenceIndex + 1} of ${sentences.length} (Repetition ${currentRepetition + 1} of ${repetitions})`;
-        }
+            function startPlayback() {
+                // Get current settings
+                pauseDuration = parseFloat(document.getElementById('pauseDuration').value) * 1000;
+                repetitions = parseInt(document.getElementById('repetitions').value);
+                speechRate = parseFloat(document.getElementById('speechRate').value);
+                languageOrder = document.getElementById('languageOrder').value;
+
+                const voices = speechSynthesis.getVoices();
+                englishVoice = voices.find(v => v.name === document.getElementById('englishVoice').value);
+                japaneseVoice = voices.find(v => v.name === document.getElementById('japaneseVoice').value);
+
+                if (!englishVoice && !japaneseVoice) {
+                    showStatus('No voices available. Install text-to-speech voices in your OS settings and click "How to Add Voices" for help.', 'error');
+                    return;
+                }
+
+                // Reset state
+                currentSentenceIndex = 0;
+                currentRepetition = 0;
+                // Set initial language based on user preference
+                isEnglish = (languageOrder === 'english-first');
+                isPlaying = true;
+                isPaused = false;
+
+                // Show player
+                document.getElementById('playerSection').classList.add('show');
+                document.getElementById('playBtn').disabled = true;
+                document.getElementById('pauseBtn').disabled = false;
+
+                // Start speaking
+                speakNext();
+            }
+
+            function speakNext() {
+                if (!isPlaying || isPaused) return;
+
+                if (currentSentenceIndex >= sentences.length) {
+                    // Finished
+                    stopPlayback();
+                    showStatus('Playback completed!', 'success');
+                    return;
+                }
+
+                const pair = sentences[currentSentenceIndex];
+                const text = isEnglish ? pair.english : pair.japanese;
+                const voice = isEnglish ? englishVoice : japaneseVoice;
+
+                // Update UI
+                updateCurrentSentence(text, isEnglish);
+                highlightCurrentPair();
+                updateProgress();
+
+                const utterance = new SpeechSynthesisUtterance(text);
+                if (voice) utterance.voice = voice;
+                utterance.rate = speechRate;
+
+                utterance.onerror = (event) => {
+                    if (event.error === 'canceled' || event.error === 'interrupted') return;
+                    showStatus(`Speech error: ${event.error}. Try selecting a different voice.`, 'error');
+                    stopPlayback();
+                };
+
+                utterance.onend = () => {
+                    if (!isPlaying || isPaused) return;
+
+                    pauseTimeout = setTimeout(() => {
+                        // Determine what language we just spoke
+                        const firstLanguageIsEnglish = (languageOrder === 'english-first');
+                        const justSpokeFirstLanguage = (isEnglish === firstLanguageIsEnglish);
+
+                        if (justSpokeFirstLanguage) {
+                            // Just spoke first language, now speak second language
+                            isEnglish = !isEnglish;
+                            speakNext();
+                        } else {
+                            // Just spoke second language, reset for next repetition/sentence
+                            isEnglish = firstLanguageIsEnglish;
+                            currentRepetition++;
+
+                            if (currentRepetition >= repetitions) {
+                                currentRepetition = 0;
+                                currentSentenceIndex++;
+                            }
+
+                            speakNext();
+                        }
+                    }, pauseDuration);
+                };
+
+                speechSynthesis.speak(utterance);
+            }
+
+            function pausePlayback() {
+                isPaused = true;
+                speechSynthesis.pause();
+                if (pauseTimeout) {
+                    clearTimeout(pauseTimeout);
+                    pauseTimeout = null;
+                }
+                document.getElementById('playBtn').disabled = false;
+                document.getElementById('pauseBtn').disabled = true;
+            }
+
+            function resumePlayback() {
+                if (!isPlaying) return;
+                isPaused = false;
+
+                if (speechSynthesis.paused) {
+                    speechSynthesis.resume();
+                } else {
+                    speakNext();
+                }
+
+                document.getElementById('playBtn').disabled = true;
+                document.getElementById('pauseBtn').disabled = false;
+            }
+
+            function stopPlayback() {
+                isPlaying = false;
+                isPaused = false;
+                speechSynthesis.cancel();
+                if (pauseTimeout) {
+                    clearTimeout(pauseTimeout);
+                    pauseTimeout = null;
+                }
+
+                document.getElementById('playBtn').disabled = false;
+                document.getElementById('pauseBtn').disabled = true;
+
+                // Clear highlighting
+                document.querySelectorAll('.sentence-pair').forEach(el => {
+                    el.classList.remove('active');
+                });
+
+                // Reset progress bar
+                updateProgressBar(0);
+            }
+
+            function restartPlayback() {
+                stopPlayback();
+                setTimeout(() => startPlayback(), 100);
+            }
+
+            function updateCurrentSentence(text, isEng) {
+                const label = document.querySelector('.current-sentence .label');
+                const textEl = document.querySelector('.current-sentence .text');
+
+                label.textContent = isEng ? 'English' : '日本語 Japanese';
+                textEl.textContent = text;
+                textEl.className = isEng ? 'text' : 'text japanese-text';
+            }
+
+            function highlightCurrentPair() {
+                document.querySelectorAll('.sentence-pair').forEach(el => {
+                    el.classList.remove('active');
+                });
+
+                const currentPair = document.getElementById(`pair-${currentSentenceIndex}`);
+                if (currentPair) {
+                    currentPair.classList.add('active');
+                    currentPair.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }
+            }
+
+            function updateProgress() {
+                const progressInfo = document.getElementById('progressInfo');
+                progressInfo.textContent = `Sentence ${currentSentenceIndex + 1} of ${sentences.length} (Repetition ${currentRepetition + 1} of ${repetitions})`;
+
+                // Update progress bar
+                const totalSteps = sentences.length * repetitions;
+                const completedSteps = currentSentenceIndex * repetitions + currentRepetition;
+                const percent = totalSteps > 0 ? Math.round((completedSteps / totalSteps) * 100) : 0;
+                updateProgressBar(percent);
+            }
+
+            function updateProgressBar(percent) {
+                const bar = document.getElementById('progressBar');
+                const container = document.getElementById('progressBarContainer');
+                bar.style.width = percent + '%';
+                container.setAttribute('aria-valuenow', percent);
+            }
+        })();
     </script>
 </body>
 </html>
